@@ -55,6 +55,20 @@ const Repository = struct {
             ),
         );
         defer client.allocator.free(response.body);
+
+        // GitHub's contributor statistics endpoint can legitimately return
+        // 204 No Content when contributor statistics are unavailable for a
+        // repository. Treat that as an empty result instead of failing the
+        // entire stats generation workflow.
+        if (response.status == .no_content) {
+            self.lines_changed = 0;
+            std.log.info(
+                "No contributor data available for {s}; treating lines changed as 0.",
+                .{self.name},
+            );
+            return .ok;
+        }
+
         if (response.status == .ok) {
             self.lines_changed = 0;
             const authors = std.json.parseFromSliceLeaky(
@@ -596,8 +610,8 @@ fn getLinesChanged(
             try io.sleep(.fromSeconds(delay), .real);
         }
         switch (try item.repo.getLinesChanged(arena, client, self.user)) {
-    .ok, .no_content => {},
-    .accepted, .forbidden, .too_many_requests => {
+            .ok, .no_content => {},
+            .accepted, .forbidden, .too_many_requests => {
                 item.timestamp =
                     std.Io.Clock.real.now(io).toSeconds() + item.delay;
                 // Note: this actually works way better with a very short delay,
